@@ -1,19 +1,15 @@
 from __future__ import annotations
 
+import argparse
 import json
+import os
 
 from .engine import IntelligenceEngine
-from .models import UserProfile
+from .models import UserProfile, utcnow
 
 
-def main() -> None:
-    user = UserProfile(
-        token_watchlist={"BTC", "ETH", "SOL"},
-        whale_wallets={"0xABCDEF1234"},
-        alert_threshold=0.55,
-    )
-    engine = IntelligenceEngine(user)
-    sample_streams = {
+def _sample_streams() -> dict[str, list[dict]]:
+    return {
         "onchain": [
             {
                 "timestamp": "2026-02-01T12:00:00Z",
@@ -50,8 +46,78 @@ def main() -> None:
         ],
     }
 
-    signals, alerts = engine.run_cycle(sample_streams)
+
+def _split_csv(raw: str | None, uppercase: bool = False) -> set[str]:
+    if not raw:
+        return set()
+    values = {part.strip() for part in raw.split(",") if part.strip()}
+    if uppercase:
+        return {value.upper() for value in values}
+    return values
+
+
+def _build_user_profile() -> UserProfile:
+    watchlist = _split_csv(os.getenv("NEWS_AGENT_WATCHLIST"), uppercase=True) or {"BTC", "ETH", "SOL"}
+    wallets = _split_csv(os.getenv("NEWS_AGENT_WHALE_WALLETS"))
+    try:
+        threshold = float(os.getenv("NEWS_AGENT_ALERT_THRESHOLD", "0.55"))
+    except ValueError:
+        threshold = 0.55
+    threshold = max(0.0, min(1.0, threshold))
+    return UserProfile(token_watchlist=watchlist, whale_wallets=wallets, alert_threshold=threshold)
+
+
+def _fetch_limit(default_value: int = 25) -> int:
+    try:
+        return max(1, int(os.getenv("NEWS_AGENT_FETCH_LIMIT", str(default_value))))
+    except ValueError:
+        return default_value
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Crypto-first intelligence agent")
+    parser.add_argument(
+        "--mode",
+        choices=("live", "demo"),
+        default=os.getenv("NEWS_AGENT_MODE", "live"),
+        help="Use live ingestion sources or demo sample payloads.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=_fetch_limit(),
+        help="Maximum number of raw payloads fetched per source in live mode.",
+    )
+    parser.add_argument(
+        "--strict-live",
+        action="store_true",
+        help="Fail when live mode returns zero events instead of falling back to demo data.",
+    )
+    args = parser.parse_args()
+
+    user = _build_user_profile()
+    engine = IntelligenceEngine(user)
+
+    if args.mode == "live":
+        streams = engine.collect_live_streams(limit_per_source=max(args.limit, 1))
+        if not any(streams.values()):
+            if args.strict_live:
+                raise RuntimeError(
+                    "Live ingestion returned no events. Configure NEWS_AGENT_NEWS_FEEDS and/or ETHERSCAN_API_KEY."
+                )
+            mode = "demo-fallback"
+            streams = _sample_streams()
+        else:
+            mode = "live"
+    else:
+        mode = "demo"
+        streams = _sample_streams()
+
+    signals, alerts = engine.run_cycle(streams)
     output = {
+        "mode": mode,
+        "generated_at": utcnow().isoformat(),
+        "stream_counts": {source: len(payloads) for source, payloads in streams.items()},
         "signals": [
             {
                 "summary": s.event.summary,

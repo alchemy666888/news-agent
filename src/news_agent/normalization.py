@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 import hashlib
 import re
 from typing import Any
@@ -17,8 +18,18 @@ def parse_timestamp(value: Any) -> datetime:
     if isinstance(value, (int, float)):
         return datetime.fromtimestamp(value, tz=timezone.utc)
     if isinstance(value, str):
-        clean = value.replace("Z", "+00:00")
-        return datetime.fromisoformat(clean).astimezone(timezone.utc)
+        clean = value.strip()
+        if clean.isdigit():
+            return datetime.fromtimestamp(int(clean), tz=timezone.utc)
+
+        iso_candidate = clean.replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(iso_candidate).astimezone(timezone.utc)
+        except ValueError:
+            parsed = parsedate_to_datetime(clean)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
     raise ValueError("Unsupported timestamp format")
 
 

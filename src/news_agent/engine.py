@@ -26,6 +26,12 @@ class IntelligenceEngine:
             events.extend(ingestor.ingest(payloads))
         return self._deduplicate(events)
 
+    def collect_live_streams(self, limit_per_source: int = 25) -> dict[str, list[dict]]:
+        streams: dict[str, list[dict]] = {}
+        for source_type, ingestor in self.ingestors.items():
+            streams[source_type] = ingestor.fetch_latest(self.user_profile, limit_per_source)
+        return streams
+
     def _deduplicate(self, events: list[Event]) -> list[Event]:
         seen: set[str] = set()
         deduped: list[Event] = []
@@ -53,3 +59,8 @@ class IntelligenceEngine:
         signals = self.score_events(events)
         alerts = self.generate_alerts(signals)
         return signals, alerts
+
+    def run_live_cycle(self, limit_per_source: int = 25) -> tuple[list[Signal], list[Alert], dict[str, list[dict]]]:
+        streams = self.collect_live_streams(limit_per_source)
+        signals, alerts = self.run_cycle(streams)
+        return signals, alerts, streams
