@@ -16,7 +16,11 @@ class Alert:
 
 def should_alert(signal: Signal, user: UserProfile) -> bool:
     high_value_whale = signal.event.source_type == "onchain" and signal.event.magnitude_score >= 0.85
-    return signal.actionability_score >= user.alert_threshold or high_value_whale
+    pnl_value = abs(float(signal.event.raw_data.get("realized_pnl", 0.0))) + abs(
+        float(signal.event.raw_data.get("unrealized_pnl", 0.0))
+    )
+    high_value_hyperliquid = signal.event.source_type == "hyperliquid" and pnl_value >= 10_000
+    return signal.actionability_score >= user.alert_threshold or high_value_whale or high_value_hyperliquid
 
 
 def build_alert(signal: Signal) -> Alert:

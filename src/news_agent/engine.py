@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import Counter
 
 from .alerting import Alert, build_alert, should_alert
-from .ingestion import NewsIngestor, OnChainIngestor, SocialIngestor
+from .ingestion import HyperliquidIngestor, NewsIngestor, OnChainIngestor, SocialIngestor
 from .models import Event, Signal, UserProfile
 from .personalization import PersonalizationModel
 from .scoring import build_signal
@@ -17,6 +17,7 @@ class IntelligenceEngine:
             "onchain": OnChainIngestor(),
             "news": NewsIngestor(),
             "social": SocialIngestor(),
+            "hyperliquid": HyperliquidIngestor(),
         }
 
     def ingest_all(self, streams: dict[str, list[dict]]) -> list[Event]:

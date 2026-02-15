@@ -15,3 +15,9 @@ def test_parse_timestamp_supports_unix_string() -> None:
     ts = parse_timestamp("1739520000")
     assert ts.year == 2025
     assert ts.month == 2
+
+
+def test_parse_timestamp_supports_millisecond_epoch() -> None:
+    ts = parse_timestamp(1739520000000)
+    assert ts.year == 2025
+    assert ts.month == 2

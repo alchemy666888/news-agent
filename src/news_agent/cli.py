@@ -44,6 +44,21 @@ def _sample_streams() -> dict[str, list[dict]]:
                 "source_links": ["https://example.com/social/1"],
             }
         ],
+        "hyperliquid": [
+            {
+                "timestamp": "2026-02-01T12:04:00Z",
+                "summary": "Hyperliquid 0xABCD...1234 BTC long 2.5000 @ 43100.00, uPnL +14250.00",
+                "entities": ["0xABCDEF1234", "BTC", "HYPERLIQUID"],
+                "sentiment_score": 0.2,
+                "magnitude_score": 0.95,
+                "source_credibility": 0.9,
+                "engagement_score": 0.74,
+                "velocity_change": 0.82,
+                "source_links": ["https://app.hyperliquid.xyz/trader/0xABCDEF1234"],
+                "event_type": "position_snapshot",
+                "unrealized_pnl": 14250.0,
+            }
+        ],
     }
 
 
@@ -59,12 +74,18 @@ def _split_csv(raw: str | None, uppercase: bool = False) -> set[str]:
 def _build_user_profile() -> UserProfile:
     watchlist = _split_csv(os.getenv("NEWS_AGENT_WATCHLIST"), uppercase=True) or {"BTC", "ETH", "SOL"}
     wallets = _split_csv(os.getenv("NEWS_AGENT_WHALE_WALLETS"))
+    hyperliquid_wallets = _split_csv(os.getenv("NEWS_AGENT_HYPERLIQUID_WALLETS")) or set(wallets)
     try:
         threshold = float(os.getenv("NEWS_AGENT_ALERT_THRESHOLD", "0.55"))
     except ValueError:
         threshold = 0.55
     threshold = max(0.0, min(1.0, threshold))
-    return UserProfile(token_watchlist=watchlist, whale_wallets=wallets, alert_threshold=threshold)
+    return UserProfile(
+        token_watchlist=watchlist,
+        whale_wallets=wallets,
+        hyperliquid_wallets=hyperliquid_wallets,
+        alert_threshold=threshold,
+    )
 
 
 def _fetch_limit(default_value: int = 25) -> int:

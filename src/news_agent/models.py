@@ -22,6 +22,7 @@ class Event:
 class UserProfile:
     token_watchlist: set[str] = field(default_factory=set)
     whale_wallets: set[str] = field(default_factory=set)
+    hyperliquid_wallets: set[str] = field(default_factory=set)
     alert_threshold: float = 0.6
 
 

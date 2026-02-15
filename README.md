@@ -2,7 +2,7 @@
 
 Python implementation of the Phase 1 core from the **Vibe Coding Development Plan**:
 
-- Live data ingestion (on-chain/news/social)
+- Live data ingestion (on-chain/news/social/hyperliquid)
 - Event normalization into a unified event object
 - Deterministic actionability scoring
 - Lightweight personalization feedback model
@@ -15,6 +15,7 @@ Python implementation of the Phase 1 core from the **Vibe Coding Development Pla
 - News from crypto RSS feeds
 - Social signals from Reddit search RSS (watchlist-driven)
 - On-chain transfers from Etherscan (when `ETHERSCAN_API_KEY` is set)
+- Hyperliquid trader data (positions, fills, realized/unrealized PnL)
 
 ```bash
 PYTHONPATH=src python -m news_agent.cli --mode live
@@ -42,11 +43,14 @@ PYTHONPATH=src python -m news_agent.cli --mode demo
 - `NEWS_AGENT_SOCIAL_TERMS` (comma-separated terms for social ingestion)
 - `NEWS_AGENT_SOCIAL_MAX_TERMS` (default: `5`)
 - `ETHERSCAN_API_KEY` (required for live on-chain ingestion)
+- `NEWS_AGENT_HYPERLIQUID_WALLETS` (comma-separated Hyperliquid trader addresses)
+- `HYPERLIQUID_INFO_URL` (optional override; default: `https://api.hyperliquid.xyz/info`)
 
 Example:
 
 ```bash
 export NEWS_AGENT_WATCHLIST="BTC,ETH,SOL,ARB"
+export NEWS_AGENT_HYPERLIQUID_WALLETS="0xabc...,0xdef..."
 export NEWS_AGENT_ALERT_THRESHOLD="0.5"
 export ETHERSCAN_API_KEY="your_key_here"
 PYTHONPATH=src python -m news_agent.cli --mode live

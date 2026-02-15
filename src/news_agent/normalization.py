@@ -16,11 +16,17 @@ def parse_timestamp(value: Any) -> datetime:
     if isinstance(value, datetime):
         return value.astimezone(timezone.utc)
     if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(value, tz=timezone.utc)
+        numeric = float(value)
+        if numeric > 10_000_000_000:
+            numeric = numeric / 1000
+        return datetime.fromtimestamp(numeric, tz=timezone.utc)
     if isinstance(value, str):
         clean = value.strip()
         if clean.isdigit():
-            return datetime.fromtimestamp(int(clean), tz=timezone.utc)
+            numeric = int(clean)
+            if numeric > 10_000_000_000:
+                return datetime.fromtimestamp(numeric / 1000, tz=timezone.utc)
+            return datetime.fromtimestamp(numeric, tz=timezone.utc)
 
         iso_candidate = clean.replace("Z", "+00:00")
         try:

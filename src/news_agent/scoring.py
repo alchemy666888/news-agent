@@ -24,7 +24,8 @@ def calculate_urgency(event: Event, now: datetime | None = None) -> float:
 def calculate_personal_relevance(event: Event, user: UserProfile, category_weight: float = 1.0) -> float:
     entities = set(event.entities)
     token_overlap = 1.0 if entities.intersection(user.token_watchlist) else 0.2
-    wallet_overlap = 1.0 if entities.intersection(user.whale_wallets) else 0.2
+    tracked_wallets = set(user.whale_wallets) | set(user.hyperliquid_wallets)
+    wallet_overlap = 1.0 if entities.intersection(tracked_wallets) else 0.2
     base = (token_overlap * 0.6) + (wallet_overlap * 0.4)
     return _clamp(base * category_weight)
 

@@ -7,6 +7,7 @@ import json
 import os
 from urllib.parse import quote_plus, urlencode
 
+from .hyperliquid import HyperliquidInfoClient, HyperliquidPosition, HyperliquidTrade, WalletPerformance, aggregate_trade_history, normalize_positions
 from .live_sources import FeedEntry, fetch_text, parse_feed_entries
 from .models import Event, UserProfile, utcnow
 from .normalization import extract_entities, normalize_event, parse_timestamp
@@ -30,6 +31,8 @@ SOCIAL_SOURCE_CREDIBILITY = {
     "reddit.com": 0.52,
     "www.reddit.com": 0.52,
 }
+
+HYPERLIQUID_SOURCE_CREDIBILITY = 0.9
 
 IMPACT_KEYWORDS = {
     "etf": 0.18,
@@ -246,10 +249,63 @@ class SocialIngestor(BaseIngestor):
         return payloads[: max(limit, 0)]
 
 
+class HyperliquidIngestor(BaseIngestor):
+    source_type = "hyperliquid"
+
+    def __init__(self, client: HyperliquidInfoClient | None = None) -> None:
+        info_url = os.getenv("HYPERLIQUID_INFO_URL", "").strip()
+        if client is not None:
+            self.client = client
+        elif info_url:
+            self.client = HyperliquidInfoClient(info_url=info_url)
+        else:
+            self.client = HyperliquidInfoClient()
+
+    def fetch_latest(self, user_profile: UserProfile, limit: int = 25) -> list[dict]:
+        wallets = _hyperliquid_wallets_for_profile(user_profile)
+        if not wallets:
+            return []
+
+        payloads: list[dict] = []
+        per_wallet_fill_limit = max(5, min(250, max(limit, 1) * 4))
+        per_wallet_trade_events = max(2, min(20, limit // max(len(wallets), 1)))
+
+        for wallet in wallets:
+            fills = self.client.user_fills(wallet, limit=per_wallet_fill_limit)
+            state = self.client.clearinghouse_state(wallet)
+            positions = normalize_positions(wallet, state)
+            trades, performance = aggregate_trade_history(wallet, fills)
+
+            open_orders = self.client.frontend_open_orders(wallet)
+            if not open_orders:
+                open_orders = self.client.open_orders(wallet)
+            open_order_count = len(open_orders)
+
+            payloads.extend(_hyperliquid_position_payloads(positions, open_order_count))
+            payloads.extend(_hyperliquid_trade_payloads(trades, per_wallet_trade_events))
+
+            summary_payload = _hyperliquid_performance_payload(performance, positions, open_order_count)
+            if summary_payload:
+                payloads.append(summary_payload)
+
+        payloads.sort(key=lambda p: _sort_timestamp(p.get("timestamp")), reverse=True)
+        return payloads[: max(limit, 0)]
+
+
 def _wallets_for_profile(user_profile: UserProfile) -> list[str]:
     env_wallets = _split_csv(os.getenv("NEWS_AGENT_WHALE_WALLETS"))
     if env_wallets:
         return env_wallets
+    return sorted(user_profile.whale_wallets)
+
+
+def _hyperliquid_wallets_for_profile(user_profile: UserProfile) -> list[str]:
+    env_wallets = _split_csv(os.getenv("NEWS_AGENT_HYPERLIQUID_WALLETS"))
+    if env_wallets:
+        return env_wallets
+    configured = sorted(user_profile.hyperliquid_wallets)
+    if configured:
+        return configured
     return sorted(user_profile.whale_wallets)
 
 
@@ -318,11 +374,123 @@ def _tx_to_payload(wallet: str, tx: dict) -> dict | None:
     return payload
 
 
+def _hyperliquid_position_payloads(positions: list[HyperliquidPosition], open_order_count: int) -> list[dict]:
+    payloads: list[dict] = []
+    for position in positions:
+        sentiment = 0.2 if position.unrealized_pnl > 0 else -0.2 if position.unrealized_pnl < 0 else 0.0
+        payloads.append(
+            {
+                "timestamp": position.last_updated.isoformat(),
+                "summary": (
+                    f"Hyperliquid {_short_wallet(position.wallet)} {position.symbol} {position.side} "
+                    f"{position.size:.4f} @ {position.entry_price:.2f}, uPnL {position.unrealized_pnl:+.2f}"
+                ),
+                "entities": [position.wallet, position.symbol, "HYPERLIQUID"],
+                "sentiment_score": sentiment,
+                "magnitude_score": _hyperliquid_magnitude(abs(position.unrealized_pnl), position.size),
+                "source_credibility": HYPERLIQUID_SOURCE_CREDIBILITY,
+                "engagement_score": _clamp(0.55 + min(open_order_count, 10) * 0.03),
+                "velocity_change": _clamp(0.5 + min(open_order_count, 8) * 0.04),
+                "source_links": [f"https://app.hyperliquid.xyz/trader/{position.wallet}"],
+                "event_type": "position_snapshot",
+                "entry_price": position.entry_price,
+                "mark_price": position.mark_price,
+                "unrealized_pnl": position.unrealized_pnl,
+                "wallet": position.wallet,
+            }
+        )
+    return payloads
+
+
+def _hyperliquid_trade_payloads(trades: list[HyperliquidTrade], limit: int) -> list[dict]:
+    if not trades:
+        return []
+
+    selected = sorted(trades, key=lambda trade: trade.timestamp, reverse=True)[: max(limit, 0)]
+    payloads: list[dict] = []
+    for trade in selected:
+        sentiment = 0.25 if trade.realized_pnl > 0 else -0.25 if trade.realized_pnl < 0 else 0.0
+        summary = (
+            f"Hyperliquid {_short_wallet(trade.wallet)} {trade.symbol} {trade.side} "
+            f"{trade.size:.4f} @ {trade.price:.2f}, rPnL {trade.realized_pnl:+.2f}"
+        )
+        payloads.append(
+            {
+                "timestamp": trade.timestamp.isoformat(),
+                "summary": summary,
+                "entities": [trade.wallet, trade.symbol, "HYPERLIQUID"],
+                "sentiment_score": sentiment,
+                "magnitude_score": _hyperliquid_magnitude(abs(trade.realized_pnl), trade.size),
+                "source_credibility": HYPERLIQUID_SOURCE_CREDIBILITY,
+                "engagement_score": 0.7,
+                "velocity_change": 0.75,
+                "source_links": [f"https://app.hyperliquid.xyz/trader/{trade.wallet}"],
+                "event_type": "fill",
+                "trade_id": trade.trade_id,
+                "entry_price": trade.entry_price,
+                "exit_price": trade.exit_price,
+                "realized_pnl": trade.realized_pnl,
+                "cumulative_wallet_pnl": trade.cumulative_pnl,
+                "wallet": trade.wallet,
+            }
+        )
+    return payloads
+
+
+def _hyperliquid_performance_payload(
+    performance: WalletPerformance,
+    positions: list[HyperliquidPosition],
+    open_order_count: int,
+) -> dict | None:
+    if performance.trade_count == 0 and not positions:
+        return None
+
+    unrealized_total = sum(position.unrealized_pnl for position in positions)
+    realized_total = performance.total_realized_pnl
+    combined_abs_pnl = abs(realized_total) + abs(unrealized_total)
+    symbols = sorted({position.symbol for position in positions}) or ["HYPERLIQUID"]
+
+    sentiment = 0.2 if realized_total + unrealized_total > 0 else -0.2 if realized_total + unrealized_total < 0 else 0.0
+    return {
+        "timestamp": performance.latest_trade_time.isoformat(),
+        "summary": (
+            f"Hyperliquid {_short_wallet(performance.wallet)} performance: "
+            f"fills={performance.trade_count}, realized={realized_total:+.2f}, "
+            f"unrealized={unrealized_total:+.2f}, win_rate={performance.win_rate:.0%}"
+        ),
+        "entities": [performance.wallet, *symbols],
+        "sentiment_score": sentiment,
+        "magnitude_score": _hyperliquid_magnitude(combined_abs_pnl, max(len(positions), 1)),
+        "source_credibility": HYPERLIQUID_SOURCE_CREDIBILITY,
+        "engagement_score": _clamp(0.55 + min(open_order_count, 10) * 0.03),
+        "velocity_change": _clamp(0.45 + min(performance.trade_count, 20) * 0.02),
+        "source_links": [f"https://app.hyperliquid.xyz/trader/{performance.wallet}"],
+        "event_type": "wallet_performance",
+        "wallet": performance.wallet,
+        "trade_count": performance.trade_count,
+        "total_realized_pnl": realized_total,
+        "total_unrealized_pnl": unrealized_total,
+        "cumulative_fees": performance.cumulative_fees,
+    }
+
+
 def _safe_int(value: object) -> int:
     try:
         return int(str(value))
     except (TypeError, ValueError):
         return 0
+
+
+def _short_wallet(wallet: str) -> str:
+    if len(wallet) <= 12:
+        return wallet
+    return f"{wallet[:6]}...{wallet[-4:]}"
+
+
+def _hyperliquid_magnitude(abs_pnl: float, size: float) -> float:
+    pnl_component = min(abs_pnl / 10_000, 1.0) * 0.55
+    size_component = min(size / 5, 1.0) * 0.25
+    return _clamp(0.35 + pnl_component + size_component)
 
 
 def _sort_timestamp(value: object) -> object:
