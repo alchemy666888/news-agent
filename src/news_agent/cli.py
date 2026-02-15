@@ -8,6 +8,28 @@ from .engine import IntelligenceEngine
 from .models import UserProfile, utcnow
 
 
+def _load_dotenv(path: str = ".env") -> None:
+    if not os.path.exists(path):
+        return
+
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            entry = line.strip()
+            if not entry or entry.startswith("#") or "=" not in entry:
+                continue
+
+            key, raw_value = entry.split("=", maxsplit=1)
+            key = key.strip()
+            value = raw_value.strip()
+            if not key:
+                continue
+
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                value = value[1:-1]
+
+            os.environ.setdefault(key, value)
+
+
 def _sample_streams() -> dict[str, list[dict]]:
     return {
         "onchain": [
@@ -96,6 +118,8 @@ def _fetch_limit(default_value: int = 25) -> int:
 
 
 def main() -> None:
+    _load_dotenv()
+
     parser = argparse.ArgumentParser(description="Crypto-first intelligence agent")
     parser.add_argument(
         "--mode",

@@ -54,6 +54,24 @@ class WalletPerformance:
     latest_trade_time: datetime
 
 
+@dataclass(slots=True)
+class PositionHistoryRow:
+    wallet: str
+    timestamp: datetime
+    trade_id: str
+    symbol: str
+    fill_side: str
+    fill_size: float
+    fill_price: float
+    fee: float
+    position_side: str
+    position_size: float
+    avg_entry_price: float
+    realized_pnl: float
+    cumulative_realized_pnl: float
+    cumulative_fees: float
+
+
 class HyperliquidInfoClient:
     def __init__(
         self,
@@ -191,6 +209,54 @@ def aggregate_trade_history(wallet: str, fills: list[dict[str, Any]]) -> tuple[l
         latest_trade_time=latest_trade_time,
     )
     return trades, performance
+
+
+def reconstruct_position_history(wallet: str, fills: list[dict[str, Any]]) -> list[PositionHistoryRow]:
+    normalized = [_normalize_fill(wallet, fill) for fill in fills]
+    normalized = [fill for fill in normalized if fill is not None]
+    normalized.sort(key=lambda fill: fill.timestamp)
+
+    states: dict[str, _PositionState] = {}
+    rows: list[PositionHistoryRow] = []
+    cumulative_realized_pnl = 0.0
+    cumulative_fees = 0.0
+
+    for fill in normalized:
+        state = states.setdefault(fill.symbol, _PositionState())
+        realized, _, _ = state.apply_fill(fill.side, fill.size, fill.price)
+        realized_after_fee = realized - fill.fee
+
+        cumulative_realized_pnl += realized_after_fee
+        cumulative_fees += fill.fee
+        signed_size = state.signed_size
+
+        if signed_size > 0:
+            position_side = "long"
+        elif signed_size < 0:
+            position_side = "short"
+        else:
+            position_side = "flat"
+
+        rows.append(
+            PositionHistoryRow(
+                wallet=wallet,
+                timestamp=fill.timestamp,
+                trade_id=fill.trade_id,
+                symbol=fill.symbol,
+                fill_side=fill.side,
+                fill_size=fill.size,
+                fill_price=fill.price,
+                fee=fill.fee,
+                position_side=position_side,
+                position_size=abs(signed_size),
+                avg_entry_price=state.average_entry,
+                realized_pnl=realized_after_fee,
+                cumulative_realized_pnl=cumulative_realized_pnl,
+                cumulative_fees=cumulative_fees,
+            )
+        )
+
+    return rows
 
 
 def _default_post_json(url: str, payload: dict[str, Any], timeout_seconds: float) -> Any:

@@ -1,4 +1,5 @@
-from news_agent.hyperliquid import aggregate_trade_history, normalize_positions
+from news_agent.export_hyperliquid_positions import wallets_from_env
+from news_agent.hyperliquid import aggregate_trade_history, normalize_positions, reconstruct_position_history
 from news_agent.ingestion import HyperliquidIngestor
 from news_agent.models import UserProfile
 
@@ -97,3 +98,36 @@ def test_hyperliquid_ingestor_emits_position_trade_and_performance_payloads() ->
     assert "position_snapshot" in event_types
     assert "fill" in event_types
     assert "wallet_performance" in event_types
+
+
+def test_reconstruct_position_history_tracks_running_state() -> None:
+    fills = [
+        {"coin": "ETH", "side": "buy", "sz": "2.0", "px": "1000", "fee": "1", "time": "2026-02-14T10:00:00Z", "tid": "1"},
+        {"coin": "ETH", "side": "sell", "sz": "1.0", "px": "1100", "fee": "1", "time": "2026-02-14T10:01:00Z", "tid": "2"},
+        {"coin": "ETH", "side": "sell", "sz": "1.0", "px": "900", "fee": "1", "time": "2026-02-14T10:02:00Z", "tid": "3"},
+    ]
+
+    rows = reconstruct_position_history("0xwallet", fills)
+
+    assert len(rows) == 3
+    assert rows[0].position_side == "long"
+    assert rows[0].position_size == 2.0
+    assert rows[1].position_size == 1.0
+    assert rows[2].position_side == "flat"
+    assert rows[2].cumulative_fees == 3.0
+
+
+def test_wallets_from_env_extracts_and_dedupes_addresses() -> None:
+    raw = (
+        "0x1111111111111111111111111111111111111111,"
+        "0x2222222222222222222222222222222222222222"
+        "0x3333333333333333333333333333333333333333,"
+        "0x1111111111111111111111111111111111111111"
+    )
+    wallets = wallets_from_env(raw)
+
+    assert wallets == [
+        "0x1111111111111111111111111111111111111111",
+        "0x2222222222222222222222222222222222222222",
+        "0x3333333333333333333333333333333333333333",
+    ]

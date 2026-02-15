@@ -35,6 +35,8 @@ PYTHONPATH=src python -m news_agent.cli --mode demo
 
 ## Config (Environment Variables)
 
+The CLI auto-loads values from `.env` in the project root.
+
 - `NEWS_AGENT_WATCHLIST` (default: `BTC,ETH,SOL`)
 - `NEWS_AGENT_WHALE_WALLETS` (comma-separated wallet addresses)
 - `NEWS_AGENT_ALERT_THRESHOLD` (default: `0.55`)
@@ -60,4 +62,12 @@ PYTHONPATH=src python -m news_agent.cli --mode live
 
 ```bash
 PYTHONPATH=src pytest
+```
+
+## Export Hyperliquid Position History CSV
+
+Uses wallet addresses from `NEWS_AGENT_HYPERLIQUID_WALLETS` in `.env`:
+
+```bash
+PYTHONPATH=src python -m news_agent.export_hyperliquid_positions --output hyperliquid_position_history.csv
 ```
